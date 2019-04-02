@@ -1,0 +1,20 @@
+
+import pandas as pd
+import matplotlib.pylab as plt
+
+unames = ['user_id', 'gender', 'age', 'occupation', 'zip']
+users = pd.read_table('pydata-book-2nd-edition/datasets/movielens/users.dat', sep='::',header=None,names=unames, engine='python')
+
+rnames = ['user_id', 'movie_id','rating','timestamp']
+ratings = pd.read_table('pydata-book-2nd-edition/datasets/movielens/ratings.dat',sep='::',header=None,names=rnames, engine='python')
+
+mnames = ['movie_id','title','genres']
+movies = pd.read_table('pydata-book-2nd-edition/datasets/movielens/movies.dat',sep='::',header=None,names=mnames, engine='python')
+
+# print(users[:5])
+# print(ratings)
+
+data = pd.merge(pd.merge(ratings,users),movies)
+# print(data)
+mean_ratings = data.pivot_table('rating',index='title',columns='gender',aggfunc='mean') #计算每部电影的平均得分 rows改为index，cols改为columns
+print(mean_ratings[:5])
