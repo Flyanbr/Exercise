@@ -1,0 +1,128 @@
+# !/user/bin/env python
+#coding=utf-8
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+
+names1880 = pd.read_csv('pydata-book-2nd-edition/datasets/babynames/yob1880.txt',names=['name','sex','births'])
+# print(names1880.info())
+# print(names1880.groupby('sex').births.sum())
+
+# 首先要将数据集进行组装，从1880到2010，组装到一个DataFrame里
+years = range(1880,2011)
+
+piece=[]
+columns = ['name','sex','births']
+for year in years:
+    path = 'pydata-book-2nd-edition/datasets/babynames/yob%d.txt' % year
+    frame = pd.read_csv(path, names=columns)
+
+    frame['year'] = year
+    piece.append(frame)
+
+# 将所有数据整合到单个DataFrame中
+names = pd.concat(piece, ignore_index=True)
+# print(names.info())
+
+# 用groupby和pivot_table在year和sex进行聚合
+total_births = names.pivot_table('births',index='year',columns='sex',aggfunc=sum)
+# print(total_births.tail())
+# total_births.plot(title='total births by sex and year')
+# plt.show()
+
+def add_prop(group):
+    # 整数除法会向下圆整
+    births = group.births.astype(float)
+    #插入prop列，存放指定名字的婴儿数相对总出生数的比例
+    group['prop'] = births/births.sum()
+    return group
+names = names.groupby(['year','sex']).apply(add_prop)
+# print(names)
+# print(np.allclose(names.groupby(['year','sex']).prop.sum(),1))
+
+# 提取数据集按sex/year组合的前1000个名字
+def get_top1000(group):
+    return group.sort_values(by='births',ascending=False)[:1000]
+grouped = names.groupby(['year','sex'])
+top1000 = grouped.apply(get_top1000)
+# print(top1000[:10])
+
+# 分析命名趋势（对top1000的数据）
+# 首先分为男女两部分
+boys = top1000[top1000.sex == 'M']
+girls = top1000[top1000.sex == 'F']
+# 生成一张按year和name统计的总出生数透视表
+total_births = top1000.pivot_table('births',index='year',columns='name',aggfunc=sum)
+# print(total_births[:20])
+# 绘制几个名字的曲线图
+subset = total_births[['John','Mary','Harry','Marilyn']]
+# subset.plot(subplots=True,figsize=(12,10),grid=False,title='Number of births per year')
+# plt.show()
+
+# 评估命名多样性的增长
+# 方法1：计算最流行的1000个名字所占的比例，按year和sex进行聚合并绘图
+table = top1000.pivot_table('prop',index='year',columns='sex',aggfunc=sum)
+table.plot(title='Sum of table1000.prop by year and sex',yticks=np.linspace(0,1.2,13), xticks=range(1880,2020,10)) # 以10为间隔
+# plt.show() # 从图中可以看到最流行的名字所占的比例在降低，说明名字多样性在增加
+# 方法2：计算占总出生人数前50%的不同名字的数量，只考虑2010年男孩的名字（因为不好计算）
+df = boys[boys.year == 2010]
+# 找到50%，先计算prop的累计和cumsum，再通过searchsorted方法找出0.5应该被插在哪个位置
+prop_cumsum = df.sort_values(by='prop',ascending=False).prop.cumsum()
+# print(prop_cumsum[:10])
+# print(prop_cumsum.searchsorted(0.5)+1) # 加1因为索引从0开始
+# 拿1900年的数据做个比较
+df = boys[boys.year == 1900]
+in1900 = df.sort_values(by='prop',ascending=False).prop.cumsum()
+# print(in1900.searchsorted(0.5)+1)
+
+# 现在可以对所有year/sex组合执行计算，按这两个字段进行groupby处理，然后用一个函数计算各分组的这个值
+def get_quantile_count(group, q=0.5): # quantile count：分位数
+    group = group.sort_values(by='prop',ascending=False) # ascending=False代表降序
+    return group.prop.cumsum().searchsorted(q)[0]+1  #取[0]后均变为int64,不取[0]的话是dtypes object，不是数字类型
+diversity = top1000.groupby(['year','sex']).apply(get_quantile_count)
+diversity = diversity.unstack('sex') #unstack函数将数据从”花括号结构“变成”表格结构“，即要将其中一层的列索引变成行索引
+# 现在diversity拥有两个时间序列（每个性别各一个，按年度索引）
+# print(diversity.head())
+diversity.plot(title='Number of popular names in top 50%')
+# plt.show()
+
+# 从name列取出最后一个字母
+get_last_letter = lambda x:x[-1]
+last_letters = names.name.map(get_last_letter)
+last_letters.name = 'last_letter'
+# 将年度，性别以及末字母进行聚合
+table = names.pivot_table('births',index=last_letters,columns=['sex','year'],aggfunc=sum)
+
+subtable = table.reindex(columns=[1910,1960,2010],level='year')
+# print(subtable.head())
+# 对该表进行规范化处理，得出百分比
+# print(subtable.sum())
+letter_prop = subtable / subtable.sum().astype(float)
+fig, axes = plt.subplots(2,1,figsize=(10,8))
+letter_prop['M'].plot(kind='bar',rot=0,ax=axes[0],title='Male')
+letter_prop['F'].plot(kind='bar',rot=0,ax=axes[1],title='Female',legend=False)
+# plt.show()
+
+# 对table按年度和性别进行规范化处理
+letter_prop = table / table.sum().astype(float)
+dny_ts = letter_prop.ix[['d','n','y'],'M'].T
+# print(dny_ts.head())
+dny_ts.plot()
+# plt.show()
+
+# 变成女孩名字的男孩名字
+all_names = top1000.name.unique()
+mask = np.array(['lesl' in x.lower() for x in all_names])
+lesley_like = all_names[mask]
+# print(lesley_like)
+# 利用这个结果过滤其他的名字，并按名字分组计算出生数以查看相对频率
+filtered = top1000[top1000.name.isin(lesley_like)]
+# print(filtered.groupby('name').births.sum())
+# 接下来按性别和年度进行聚合，并按年度进行规范化处理
+table = filtered.pivot_table('births',index='year',columns='sex',aggfunc='sum')
+table = table.div(table.sum(1),axis=0)
+# print(table.tail())
+# 绘制一张分性别的年度曲线
+table.plot(style={'M':'k-','F':'k--'},title="各年度使用‘lesley’型名字的男女比例")
+plt.show()
